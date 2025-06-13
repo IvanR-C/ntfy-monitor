@@ -29,6 +29,17 @@ A lightweight media folder monitor that watches for new files and automatically 
 
 ### 1️⃣ Clone the repo
 
-```bash
-git clone https://github.com/YOURUSERNAME/media-monitor.git
-cd media-monitor
+```yaml
+services:
+  media-monitor:
+    image: ivanchelo/ffprobe-ntfy-monitor:latest
+    container_name: media_monitor
+    restart: unless-stopped
+    environment:
+      - WATCH_DIR=/watch
+      - NTFY_TOPIC=topic-name # <-- replace with your ntfy topic
+      - NTFY_SERVER=https://ntfy.sh # <-- replace with your ntfy server if self-hosted
+    volumes:
+      - /path/to/your/path1:/watch/path1
+      - /path/to/your/path2:/watch/path2 # <-- add as many paths as you want inside watch and they will all be monitored
+networks: {}
