@@ -27,8 +27,6 @@ A lightweight media folder monitor that watches for new files and automatically 
 
 ## Usage
 
-### 1️⃣ Clone the repo
-
 ```yaml
 services:
   media-monitor:
