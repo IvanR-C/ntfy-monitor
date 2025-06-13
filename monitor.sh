@@ -1,8 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 
 watch_dir=${WATCH_DIR:-/watch}
-stabilize_interval=10  # seconds between checks
-stabilize_checks=3     # how many times size must stay stable
+db_file="./processed.db"
+stabilize_interval=10
+stabilize_checks=3
 
 wait_for_stable_file() {
   local file="$1"
@@ -24,16 +25,35 @@ wait_for_stable_file() {
   done
 }
 
+is_already_processed() {
+  local file="$1"
+  grep -Fxq "$file" "$db_file" 2>/dev/null
+}
+
+mark_as_processed() {
+  local file="$1"
+  echo "$file" >> "$db_file"
+}
+
 analyze_file() {
   local file="$1"
   local title=$(basename "$(dirname "$file")")
+
+  # Skip if already processed
+  if is_already_processed "$file"; then
+    echo "Already processed: $file"
+    return
+  fi
 
   INFO=$(ffprobe -v quiet -print_format json -show_format -show_streams "$file")
   FORMAT=$(echo "$INFO" | jq -r '.format.format_name')
   SIZE=$(stat --printf="%s" "$file")
 
   STATUS=()
-  NEEDS_REMUX=()
+  NEEDS_REMUX=false
+
+  AUDIO_MISSING=$(echo "$INFO" | jq '[.streams[] | select(.codec_type=="audio") | .tags.language // empty] | map(select(. == "")) | length')
+  SUB_MISSING=$(echo "$INFO" | jq '[.streams[] | select(.codec_type=="subtitle") | .tags.language // empty] | map(select(. == "")) | length')
 
   if [ "$AUDIO_MISSING" -gt 0 ] || [ "$SUB_MISSING" -gt 0 ]; then
     NEEDS_REMUX=true
@@ -43,32 +63,29 @@ analyze_file() {
     STATUS+=("RE-ENCODE")
   fi
 
-  # Check remux condition
   if [ "$NEEDS_REMUX" = true ]; then
-      STATUS+=("REMUX")
+    STATUS+=("REMUX")
   fi
 
-  # If none applied
   if [ ${#STATUS[@]} -eq 0 ]; then
-      STATUS+=("OK")
+    STATUS+=("OK")
   fi
-
-  # curl -X POST -H "Title: $title" -d "Result: $STATUS\nReason: $REASON" "$NTFY_SERVER/$NTFY_TOPIC"
 
   FINAL_STATUS=$(IFS=' | '; echo "${STATUS[*]}")
-  payload=$(printf "📦 *File:* %s\n📝 *Result:* %s\n🎯 *Reason:* %s" "$file" "$FINAL_STATUS" "$REASON")
+  payload=$(printf "📦 *File:* %s\n📝 *Result:* %s" "$file" "$FINAL_STATUS")
 
   curl -X POST \
     -H "Title: $title" \
-    -H "Tags: $format" \
+    -H "Tags: $FORMAT" \
     -d "$payload" "$NTFY_SERVER/$NTFY_TOPIC"
-  }
+
+  mark_as_processed "$file"
+}
 
 inotifywait -m -r -e close_write,moved_to,create "$watch_dir" --format '%w%f' | while read FILE
 do
   if [ -f "$FILE" ]; then
     echo "Detected: $FILE"
-    echo "Format: $FORMAT"
     wait_for_stable_file "$FILE"
     analyze_file "$FILE"
   fi
